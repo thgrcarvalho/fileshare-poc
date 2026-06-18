@@ -15,8 +15,12 @@ files.save(share, "report.txt", "Q2 revenue up 12%".getBytes(UTF_8));   // store
 files.save(share, "notes.md", "remember to call the bank".getBytes(UTF_8));
 
 files.listFiles(share);                                // [report.txt, notes.md]
-files.search(share, "revenue");                        // [report.txt]  — matches decrypted content
 new String(files.read(share, "report.txt"), UTF_8);    // "Q2 revenue up 12%"
+
+List<SearchHit> hits = files.search(share, "revenue"); // matches decrypted content
+hits.get(0).name();                                    // report.txt
+hits.get(0).matchedOn();                               // [CONTENT]
+hits.get(0).snippet();                                 // Optional["Q2 revenue up 12%"]
 
 files.delete(share, "notes.md");                       // soft delete (recoverable)
 files.listFiles(share);                                // [report.txt]
@@ -34,6 +38,7 @@ dev.thgrcarvalho.fileshare
 ├── domain/                          ← types, contracts, validation
 │   ├── Vault                        (AGGREGATE root: id + files + soft-delete lifecycle)
 │   ├── VaultId / FileName / Bytes   (value objects)
+│   ├── SearchHit / MatchField       (search result: which file, which fields, content snippet)
 │   ├── StoredFile                   (package-private: name + ciphertext + deleted flag)
 │   ├── Cipher                       (port: encrypt / decrypt)
 │   ├── VaultRepository              (port)
@@ -64,13 +69,15 @@ Encryption is a `Cipher` **port** in the domain: `encrypt(Bytes) → Bytes`, `de
 
 `search` looks at active files only and matches a query **case-insensitively** against the file name **or** the decrypted content — so content search is what forces the decrypt-through-the-port path, the same boundary `read` uses. Filenames are case-**sensitive** for identity (`Report.txt` and `report.txt` are two files), but search is case-insensitive for convenience.
 
+Each match comes back as a **`SearchHit`**, not just a name: the file, the set of fields it matched on (`MatchField.NAME`, `MatchField.CONTENT`, or both), and — when the content matched — a short **snippet** of the decrypted text around the first occurrence (`Optional<String>`, empty for a name-only match). The snippet is cut from the *decrypted* content, so it too lives on the read side of the encryption boundary; you never index or excerpt ciphertext.
+
 ### Errors as API
 
 The five domain failures share a **sealed** `FileShareException` base and carry typed accessors (`name()` / `id()`): `UnknownVaultException`, `VaultAlreadyExistsException`, `UnknownFileException`, `FileAlreadyDeletedException`, `FileNotDeletedException`. A caller can catch the category or switch it exhaustively. (A blank vault id or file name, or a null payload, is rejected earlier at value-object construction with `IllegalArgumentException` / `NullPointerException` — argument errors, kept separate from these domain-state failures.)
 
 ## Deferred (intentionally out of scope)
 
-A real cipher (AES-GCM with proper key management and per-file IVs — the point here is the *boundary*, not the algorithm), concurrent access (the in-memory repository is thread-safe, but the service's load → mutate → save isn't serialized per vault — there was no concurrency requirement in this exercise, unlike the box office), a persistent repository adapter, searching inside deleted ("trash") files, per-vault quotas or size limits, file versioning/history, and any notion of users or sharing permissions.
+A real cipher (AES-GCM with proper key management and per-file IVs — the point here is the *boundary*, not the algorithm), concurrent access (the in-memory repository is thread-safe, but the service's load → mutate → save isn't serialized per vault — there was no concurrency requirement in this exercise, unlike the box office), a persistent repository adapter, **cross-vault / whole-share search** (search is scoped to one vault), a **search index** (today every query decrypts and linearly scans every active file — fine at this size, but scaling it collides head-on with encryption-at-rest, since you can't naively index ciphertext — that's the whole field of searchable encryption), searching inside deleted ("trash") files, per-vault quotas or size limits, file versioning/history, and any notion of users or sharing permissions.
 
 ## Build & test
 

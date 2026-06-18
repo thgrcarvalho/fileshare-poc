@@ -1,5 +1,7 @@
 package dev.thgrcarvalho.fileshare.application;
 
+import dev.thgrcarvalho.fileshare.domain.FileName;
+import dev.thgrcarvalho.fileshare.domain.SearchHit;
 import dev.thgrcarvalho.fileshare.domain.UnknownVaultException;
 import dev.thgrcarvalho.fileshare.domain.VaultAlreadyExistsException;
 import dev.thgrcarvalho.fileshare.domain.VaultId;
@@ -76,8 +78,16 @@ class FileShareServiceTest {
         service.save(SHARE, "groceries.txt", text("milk and eggs"));
         service.save(SHARE, "todo.txt", text("call the bank"));
 
-        assertEquals(List.of("groceries.txt"), service.search(SHARE, "GROCERIES"));
-        assertEquals(List.of("todo.txt"), service.search(SHARE, "bank"));
+        List<SearchHit> byName = service.search(SHARE, "GROCERIES");
+        assertEquals(1, byName.size());
+        assertEquals(FileName.of("groceries.txt"), byName.get(0).name());
+        assertTrue(byName.get(0).matchedName());
+
+        List<SearchHit> byContent = service.search(SHARE, "bank");
+        assertEquals(1, byContent.size());
+        assertEquals(FileName.of("todo.txt"), byContent.get(0).name());
+        assertTrue(byContent.get(0).matchedContent());
+        assertTrue(byContent.get(0).snippet().orElseThrow().contains("bank"));
     }
 
     @Test

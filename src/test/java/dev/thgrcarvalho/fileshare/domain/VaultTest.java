@@ -2,8 +2,11 @@ package dev.thgrcarvalho.fileshare.domain;
 
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -127,18 +130,87 @@ class VaultTest {
     void searchMatchesByNameCaseInsensitively() {
         Vault vault = new Vault(SHARE);
         vault.save(FileName.of("Report.txt"), Bytes.ofText("body"), cipher);
-        vault.save(FileName.of("notes.md"), Bytes.ofText("body"), cipher);
+        vault.save(FileName.of("notes.md"), Bytes.ofText("payload"), cipher);
 
-        assertEquals(List.of(FileName.of("Report.txt")), vault.search("report", cipher));
+        List<SearchHit> hits = vault.search("report", cipher);
+
+        assertEquals(1, hits.size());
+        SearchHit hit = hits.get(0);
+        assertEquals(FileName.of("Report.txt"), hit.name());
+        assertEquals(Set.of(MatchField.NAME), hit.matchedOn());
+        assertTrue(hit.snippet().isEmpty());
     }
 
     @Test
-    void searchMatchesByDecryptedContent() {
+    void searchMatchesByDecryptedContentWithSnippet() {
         Vault vault = new Vault(SHARE);
-        vault.save(FileName.of("a.txt"), Bytes.ofText("the quick brown fox"), cipher);
+        vault.save(FileName.of("a.txt"), Bytes.ofText("the quick brown fox jumps"), cipher);
         vault.save(FileName.of("b.txt"), Bytes.ofText("lazy dog"), cipher);
 
-        assertEquals(List.of(FileName.of("a.txt")), vault.search("BROWN", cipher));
+        List<SearchHit> hits = vault.search("BROWN", cipher);
+
+        assertEquals(1, hits.size());
+        SearchHit hit = hits.get(0);
+        assertEquals(FileName.of("a.txt"), hit.name());
+        assertEquals(Set.of(MatchField.CONTENT), hit.matchedOn());
+        assertTrue(hit.snippet().orElseThrow().toLowerCase(Locale.ROOT).contains("brown"));
+    }
+
+    @Test
+    void searchReportsBothFieldsWhenNameAndContentMatch() {
+        Vault vault = new Vault(SHARE);
+        vault.save(FileName.of("brown.txt"), Bytes.ofText("a brown fox"), cipher);
+
+        SearchHit hit = vault.search("brown", cipher).get(0);
+
+        assertEquals(Set.of(MatchField.NAME, MatchField.CONTENT), hit.matchedOn());
+        assertTrue(hit.matchedName());
+        assertTrue(hit.matchedContent());
+    }
+
+    @Test
+    void contentSnippetIsTrimmedWithEllipsisAroundTheMatch() {
+        Vault vault = new Vault(SHARE);
+        String content = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa NEEDLE bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        vault.save(FileName.of("big.txt"), Bytes.ofText(content), cipher);
+
+        String snippet = vault.search("needle", cipher).get(0).snippet().orElseThrow();
+
+        assertTrue(snippet.startsWith("..."));
+        assertTrue(snippet.endsWith("..."));
+        assertTrue(snippet.contains("NEEDLE"));
+    }
+
+    @Test
+    void contentSnippetDoesNotSplitSurrogatePairs() {
+        Vault vault = new Vault(SHARE);
+        String content = "needle" + "a" + "😀".repeat(20);
+        vault.save(FileName.of("emoji.txt"), Bytes.ofText(content), cipher);
+
+        String snippet = vault.search("needle", cipher).get(0).snippet().orElseThrow();
+
+        assertEquals(snippet, new String(snippet.getBytes(StandardCharsets.UTF_8), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void searchReturnsAllMatchesInInsertionOrder() {
+        Vault vault = new Vault(SHARE);
+        vault.save(FileName.of("b-note.txt"), Bytes.ofText("shared term"), cipher);
+        vault.save(FileName.of("a-note.txt"), Bytes.ofText("shared term"), cipher);
+
+        List<SearchHit> hits = vault.search("shared", cipher);
+
+        assertEquals(List.of(FileName.of("b-note.txt"), FileName.of("a-note.txt")),
+                hits.stream().map(SearchHit::name).toList());
+    }
+
+    @Test
+    void searchForABlankQueryReturnsNothing() {
+        Vault vault = new Vault(SHARE);
+        vault.save(FileName.of("a.txt"), Bytes.ofText("anything"), cipher);
+
+        assertTrue(vault.search("", cipher).isEmpty());
+        assertTrue(vault.search("   ", cipher).isEmpty());
     }
 
     @Test

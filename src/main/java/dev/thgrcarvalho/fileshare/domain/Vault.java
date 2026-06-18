@@ -1,12 +1,18 @@
 package dev.thgrcarvalho.fileshare.domain;
 
+import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 
 public final class Vault {
+
+    private static final int SNIPPET_PADDING = 20;
 
     private final VaultId id;
     private final Map<FileName, StoredFile> files = new LinkedHashMap<>();
@@ -67,21 +73,53 @@ public final class Vault {
                 .toList();
     }
 
-    public List<FileName> search(String query, Cipher cipher) {
+    public List<SearchHit> search(String query, Cipher cipher) {
         Objects.requireNonNull(query, "query");
         Objects.requireNonNull(cipher, "cipher");
+        if (query.isBlank()) {
+            return List.of();
+        }
         String needle = query.toLowerCase(Locale.ROOT);
-        return files.values().stream()
-                .filter(file -> !file.deleted())
-                .filter(file -> matches(file, needle, cipher))
-                .map(StoredFile::name)
-                .toList();
+        List<SearchHit> hits = new ArrayList<>();
+        for (StoredFile file : files.values()) {
+            if (file.deleted()) {
+                continue;
+            }
+            match(file, needle, cipher).ifPresent(hits::add);
+        }
+        return List.copyOf(hits);
     }
 
-    private boolean matches(StoredFile file, String needle, Cipher cipher) {
+    private Optional<SearchHit> match(StoredFile file, String needle, Cipher cipher) {
+        Set<MatchField> matchedOn = EnumSet.noneOf(MatchField.class);
         if (file.name().value().toLowerCase(Locale.ROOT).contains(needle)) {
-            return true;
+            matchedOn.add(MatchField.NAME);
         }
-        return cipher.decrypt(file.ciphertext()).text().toLowerCase(Locale.ROOT).contains(needle);
+        String content = cipher.decrypt(file.ciphertext()).text();
+        int index = content.toLowerCase(Locale.ROOT).indexOf(needle);
+        Optional<String> snippet = Optional.empty();
+        if (index >= 0) {
+            matchedOn.add(MatchField.CONTENT);
+            snippet = Optional.of(snippet(content, index, needle.length()));
+        }
+        if (matchedOn.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(new SearchHit(file.name(), matchedOn, snippet));
+    }
+
+    private static String snippet(String content, int index, int matchLength) {
+        int start = Math.max(0, index - SNIPPET_PADDING);
+        int end = Math.min(content.length(), index + matchLength + SNIPPET_PADDING);
+        if (start > 0 && Character.isLowSurrogate(content.charAt(start))) {
+            start--;
+        }
+        if (end < content.length() && Character.isLowSurrogate(content.charAt(end))) {
+            end++;
+        }
+        String core = content.substring(start, end).strip();
+        String prefix = start > 0 ? "..." : "";
+        String suffix = end < content.length() ? "..." : "";
+        return prefix + core + suffix;
     }
 }

@@ -3,6 +3,7 @@ package dev.thgrcarvalho.fileshare.application;
 import dev.thgrcarvalho.fileshare.domain.Bytes;
 import dev.thgrcarvalho.fileshare.domain.Cipher;
 import dev.thgrcarvalho.fileshare.domain.FileName;
+import dev.thgrcarvalho.fileshare.domain.SearchHit;
 import dev.thgrcarvalho.fileshare.domain.UnknownVaultException;
 import dev.thgrcarvalho.fileshare.domain.Vault;
 import dev.thgrcarvalho.fileshare.domain.VaultAlreadyExistsException;
@@ -56,8 +57,8 @@ public final class FileShareService {
         return require(id).listFiles().stream().map(FileName::value).toList();
     }
 
-    public List<String> search(VaultId id, String query) {
-        return require(id).search(query, cipher).stream().map(FileName::value).toList();
+    public List<SearchHit> search(VaultId id, String query) {
+        return require(id).search(query, cipher);
     }
 
     public Vault find(VaultId id) {
